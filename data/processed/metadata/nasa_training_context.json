@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "dataset_family": "NASA Lithium-Ion Battery Aging",
+  "global_defaults": {
+    "nominal_capacity_Ah": 2.0,
+    "charge_protocol": {
+      "mode": "CC-CV",
+      "cc_current_A": 1.5,
+      "cv_voltage_V": 4.2,
+      "termination_current_A": 0.02,
+      "source": "README protocol"
+    },
+    "resample_hz": 1,
+    "soc_method": {
+      "integration": "coulomb_counting",
+      "base_capacity": "nominal_capacity_Ah",
+      "clip_range": [0.0, 1.2]
+    }
+  },
+  "subsets": [
+    {
+      "name": "1. BatteryAgingARC-FY08Q4",
+      "ambient_temp_C": 24,
+      "discharge_protocol": {"mode": "CC", "current_A": 2.0},
+      "cutoff_voltage_per_battery": {"5": 2.7, "6": 2.5, "7": 2.2, "18": 2.5},
+      "eol_rule": "30% capacity fade (2.0 Ah → ~1.4 Ah)",
+      "notes": "Baseline room-temperature aging"
+    },
+    {
+      "name": "2. BatteryAgingARC_25_26_27_28_P1",
+      "ambient_temp_C": 24,
+      "discharge_protocol": {"mode": "square_wave", "amplitude_A": 4.0, "frequency_Hz": 0.05, "duty_cycle": 0.5},
+      "cutoff_voltage_per_battery": {"25": 2.0, "26": 2.2, "27": 2.5, "28": 2.7},
+      "eol_rule": "Not explicitly stated (likely capacity fade threshold)",
+      "notes": "Dynamic pulsed load"
+    },
+    {
+      "name": "3. BatteryAgingARC_25-44 (e.g., 29–32)",
+      "ambient_temp_C": 43,
+      "discharge_protocol": {"mode": "CC", "current_A": 4.0},
+      "cutoff_voltage_per_battery": {"29": 2.0, "30": 2.2, "31": 2.5, "32": 2.7},
+      "eol_rule": "Not explicitly stated (likely capacity fade threshold)",
+      "notes": "High-temperature accelerated aging"
+    },
+    {
+      "name": "4. BatteryAgingARC_45_46_47_48",
+      "ambient_temp_C": 4,
+      "discharge_protocol": {"mode": "CC", "current_A": [1.0, 4.0]},
+      "cutoff_voltage_range_V": [2.0, 2.7],
+      "eol_rule": "30% capacity fade (2.0 Ah → ~1.4 Ah)",
+      "notes": "Cold-temperature; several low-capacity anomalies reported"
+    },
+    {
+      "name": "5. BatteryAgingARC_49_50_51_52",
+      "ambient_temp_C": 4,
+      "discharge_protocol": {"mode": "CC", "current_A": 2.0},
+      "cutoff_voltage_range_V": [2.0, 2.7],
+      "eol_rule": "Experiment terminated early due to control software crash",
+      "notes": "Some incomplete or very low voltage/capacity runs"
+    },
+    {
+      "name": "6. BatteryAgingARC_53_54_55_56",
+      "ambient_temp_C": 4,
+      "discharge_protocol": {"mode": "CC", "current_A": 2.0},
+      "cutoff_voltage_range_V": [2.0, 2.7],
+      "eol_rule": "30% capacity fade (2.0 Ah → ~1.4 Ah)",
+      "notes": "Cold-temperature; relatively clean completion"
+    }
+  ],
+  "fields_present_in_mat": [
+    "Voltage_measured (V)",
+    "Current_measured (A)",
+    "Temperature_measured (°C)",
+    "Current_charge / Voltage_charge",
+    "Time (s) per cycle",
+    "Capacity (Ah) — discharge only",
+    "Impedance metrics (Sense_current, Battery_current, Current_ratio, Impedance, Re, Rct)"
+  ],
+  "fields_generally_missing_or_external": [
+    "Explicit nominal_capacity_Ah used for computing C-rate/SoC",
+    "Explicit CC→CV termination policy applied during analysis",
+    "Per-battery discharge cut-off mapping (if not parsed from README)",
+    "Rest times between operations (and exact sequence Charge/Discharge/EIS)",
+    "Data quality flags and anomaly exclusions",
+    "System/charger constraints for RL (max power/current, limits, safety margins)",
+    "Arrival/price/environment models for RL (user behavior, grid signals)"
+  ],
+  "rl_context_template": {
+    "charger_limits": {"max_current_A": null, "max_power_kW": null, "voltage_window_V": [3.0, 4.2]},
+    "safety_envelopes": {"max_cell_temp_C": 45, "overvoltage_V": 4.25, "overcurrent_A": null},
+    "reward_design": {"energy_delivered_weight": 1.0, "degradation_penalty_weight": null, "time_penalty_weight": null},
+    "episode_definition": {"cycle_type": "charge", "window_seconds": null, "done_conditions": ["CV_tail_below_20mA", "temp_limit_hit"]},
+    "observation_features": ["V", "I", "T_cell", "SoC", "dSoC", "C_rate"],
+    "action_space": {"set_current_A": {"min": 0.0, "max": null}, "set_voltage_V": {"min": 3.0, "max": 4.2}}
+  }
+}
