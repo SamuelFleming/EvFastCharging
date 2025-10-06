@@ -17,13 +17,7 @@ data/processed/*.json
 !data/processed/metadata/
 !data/processed/metadata/**
 
-*.mat
-*.zip
-*.7z
-*.tar
-*.tar.gz
-*.tar.bz2
-*.parquet
+
 
 # OS files
 .DS_Store
