@@ -1,0 +1,30 @@
+# Bytecode / cache
+__pycache__/
+*.py[cod]
+
+# Virtual envs
+.env/
+.venv/
+*.egg-info/
+*.ipynb_checkpoints/
+*/__pycache__/
+
+# Data & outputs
+/data/raw/**
+/data/processed/**
+data/processed/*.csv
+data/processed/*.json
+!data/processed/metadata/
+!data/processed/metadata/**
+
+*.mat
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tar.bz2
+*.parquet
+
+# OS files
+.DS_Store
+Thumbs.db
