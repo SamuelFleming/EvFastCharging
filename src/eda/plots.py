@@ -152,6 +152,84 @@ def plot_crate_hist(df: pd.DataFrame, outdir: Path) -> Path | None:
     fig.savefig(p, bbox_inches="tight", dpi=140); plt.close(fig)
     return p
 
+# ---- SoH helpers & plots -----------------------------------------------------
+
+def compute_cv_tail_per_cycle(df: pd.DataFrame, v_thresh: float = 4.15) -> pd.DataFrame:
+    """Return per-(battery_id,cycle_id) CV-tail duration in seconds."""
+    need = ["battery_id","cycle_id","t","V"]
+    if not _has(df, need):
+        return pd.DataFrame(columns=["battery_id","cycle_id","cv_tail_sec"])
+
+    def per_cycle(g: pd.DataFrame) -> float:
+        g = g.sort_values("t")
+        mask = g["V"] >= v_thresh
+        if not mask.any():
+            return 0.0
+        t = g.loc[mask, "t"].values
+        return float(t.max() - t.min()) if len(t) else 0.0
+
+    cv = (df.groupby(["battery_id","cycle_id"], sort=False)
+            .apply(per_cycle).reset_index(name="cv_tail_sec"))
+    return cv
+
+def plot_soh_vs_cycle(df_or_soh: pd.DataFrame, outdir: Path) -> Path | None:
+    """
+    Accepts either a DataFrame that already has ['battery_id','cycle_id','SoH'],
+    or a larger signals table that includes SoH. Plots SoH vs cycle for each battery.
+    """
+    cols = {"battery_id","cycle_id","SoH"}
+    if not cols.issubset(df_or_soh.columns):
+        return None
+    outdir = _ensure_outdir(outdir)
+    fig, ax = plt.subplots(figsize=(6,4))
+    for bid, g in df_or_soh[["battery_id","cycle_id","SoH"]].dropna().groupby("battery_id"):
+        gg = g.sort_values("cycle_id")
+        ax.plot(gg["cycle_id"], gg["SoH"], marker="o", ms=3, lw=1, label=str(bid))
+    ax.set_xlabel("Cycle")
+    ax.set_ylabel("SoH (capacity ratio)")
+    ax.set_title("SoH trend by cycle")
+    if df_or_soh["battery_id"].nunique() <= 8:
+        ax.legend(ncol=2, fontsize=8)
+    ax.grid(True, alpha=0.3)
+    p = outdir / "soh_vs_cycle.png"
+    fig.savefig(p, bbox_inches="tight", dpi=140); plt.close(fig)
+    return p
+
+def plot_soh_vs_cv_tail(df_signals: pd.DataFrame, outdir: Path, v_thresh: float = 4.15) -> Path | None:
+    """
+    From a signals table that includes SoH (per-row or joinable), compute per-cycle CV tail
+    and scatter SoH vs CV tail to visualise relation between degradation and charge tail length.
+    """
+    need = {"battery_id","cycle_id","V","t"}
+    if not need.issubset(df_signals.columns):
+        return None
+    outdir = _ensure_outdir(outdir)
+
+    # Per-cycle cv tail
+    cv = compute_cv_tail_per_cycle(df_signals, v_thresh=v_thresh)
+    # Try to get SoH per cycle from the same DF
+    if "SoH" in df_signals.columns:
+        soh_per_cycle = (df_signals[["battery_id","cycle_id","SoH"]]
+                         .dropna()
+                         .drop_duplicates(["battery_id","cycle_id"]))
+    else:
+        # Not available → can't plot
+        return None
+
+    dfm = cv.merge(soh_per_cycle, on=["battery_id","cycle_id"], how="inner")
+    if dfm.empty:
+        return None
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.scatter(dfm["cv_tail_sec"], dfm["SoH"], s=8, alpha=0.5)
+    ax.set_xlabel(f"CV tail [s] (V ≥ {v_thresh:.2f} V)")
+    ax.set_ylabel("SoH")
+    ax.set_title("SoH vs CV-tail duration (per cycle)")
+    ax.grid(True, alpha=0.3)
+    p = outdir / "soh_vs_cv_tail.png"
+    fig.savefig(p, bbox_inches="tight", dpi=140); plt.close(fig)
+    return p
+
 # ---- Convenience: run all available plots safely ----
 def run_all(df: pd.DataFrame, outdir: Path) -> dict:
     outdir = Path(outdir)
@@ -164,6 +242,9 @@ def run_all(df: pd.DataFrame, outdir: Path) -> dict:
         (plot_cv_tail_by_cycle,"cv_tail_by_cycle"),
         (plot_correlation,    "correlation"),
         (plot_crate_hist,     "crate_hist"),
+        # New:
+        (plot_soh_vs_cycle,   "soh_vs_cycle"),
+        (plot_soh_vs_cv_tail, "soh_vs_cv_tail"),
     ]:
         p = fn(df, outdir)
         if p is not None:
