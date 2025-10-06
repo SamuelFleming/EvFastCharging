@@ -157,4 +157,4 @@ The codebase ships with small, reproducible runners:
 
 ---
 
-*Last updated automatically when committed.*
+*Last updated 6th October*
