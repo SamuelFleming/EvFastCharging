@@ -20,7 +20,8 @@ def main():
     args = ap.parse_args()
 
     raw_root = get_root()
-    out_dir = raw_root.parent / "processed"
+    data_dir = raw_root.parents[2]   # .../data
+    out_dir = data_dir / "processed" # -> .../data/processed
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Default behavior: smallest, simplest slice

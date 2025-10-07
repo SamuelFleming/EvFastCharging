@@ -4,13 +4,15 @@ from pathlib import Path
 from typing import Iterable, Optional, Union
 import numpy as np
 
-RAW_ROOT = Path(r"C:\Users\User\OneDrive\Desktop\Tech Projects\EvFastCharging\data\raw\NASABatteryAging")
+RAW_ROOT = Path(r"C:\Users\User\OneDrive\Desktop\Tech Projects\EvFastChargingRL\data\raw\NASABatteryAging")
 
 
 
 ##RAW_ROOT = Path(r"data\raw\NASABatteryAging")
 
 mats = sorted(RAW_ROOT.glob("**/*.mat"))
+print(f'RAW ROOT: {RAW_ROOT}')
+#print(mats)
 print(f"found {len(mats)} .mat files")
 for p in mats[:12]:
     print("•", p.relative_to(RAW_ROOT))
