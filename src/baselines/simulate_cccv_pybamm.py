@@ -95,7 +95,7 @@ def _compute_soc_from_current(t_s: np.ndarray, I_A: np.ndarray, soc0: float, cap
     cum[0] = 0.0
     cum[1:] = np.cumsum(mid * dt)
     dq_Ah = cum / 3600.0  # A*s -> A*h
-    soc = soc0 + dq_Ah / cap_Ah
+    soc = soc0 - dq_Ah / cap_Ah
     return np.clip(soc, 0.0, 1.0)
 
 
@@ -413,7 +413,7 @@ def main():
     ap.add_argument("--cc-c", type=float, nargs="+", default=[1.0, 2.0, 3.0, 4.0])
     ap.add_argument("--v-max", type=float, default=None, help="Overrides Tbl3 V_max if provided")
     ap.add_argument("--i-cut-c", type=float, default=0.05)
-    ap.add_argument("--target-soc", type=float, default=0.8)
+    ap.add_argument("--target-soc", type=float, default=0.5)
     ap.add_argument("--thermal", choices=["isothermal", "lumped", "x-lumped"], default="lumped")
     ap.add_argument("--param-set", type=str, default="Chen2020", help="e.g., Chen2020, Ecker2015, Marquis2019")
     ap.add_argument("--overlay-nasa", action="store_true", help="Overlay NASA V–SoC median curve")
