@@ -12,8 +12,8 @@ beautifulsoup4 @ file:///home/conda/feedstock_root/build_artifacts/beautifulsoup
 bleach @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_bleach_1737382993/work
 Brotli @ file:///D:/bld/brotli-split_1756599174049/work
 cached-property @ file:///home/conda/feedstock_root/build_artifacts/cached_property_1615209429212/work
-casadi==3.7.0
-certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1754231422783/work/certifi
+casadi==3.6.7
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1759648874697/work/certifi
 cffi @ file:///D:/bld/cffi_1758716117187/work
 cftime @ file:///D:/bld/cftime_1756511810860/work
 charset-normalizer @ file:///home/conda/feedstock_root/build_artifacts/charset-normalizer_1754767332901/work
@@ -73,6 +73,9 @@ matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib
 mdurl @ file:///home/conda/feedstock_root/build_artifacts/mdurl_1733255585584/work
 meshio @ file:///home/conda/feedstock_root/build_artifacts/meshio_1706720595231/work
 mistune @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_mistune_1756495311/work
+mkl-service==2.4.0
+mkl_fft @ file:///C:/Users/dev-admin/mkl/mkl_fft_1730823082242/work
+mkl_random @ file:///C:/Users/dev-admin/mkl/mkl_random_1730822522280/work
 monotonic @ file:///home/conda/feedstock_root/build_artifacts/monotonic_1734029696393/work
 mpmath @ file:///home/conda/feedstock_root/build_artifacts/mpmath_1733302684489/work
 munkres==1.1.4
@@ -83,7 +86,7 @@ nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_17
 netCDF4 @ file:///D:/bld/netcdf4_1756898130357/work
 networkx==3.3
 notebook_shim @ file:///home/conda/feedstock_root/build_artifacts/notebook-shim_1733408315203/work
-numpy @ file:///D:/bld/numpy_1707225528937/work/dist/numpy-1.26.4-cp311-cp311-win_amd64.whl#sha256=537f0573fefb1e93b3633e8a79102e6b6d2911e09e0a90008993efef4242448e
+numpy @ file:///C:/b/abs_c1ywpu18ar/croot/numpy_and_numpy_base_1708638681471/work/dist/numpy-1.26.4-cp311-cp311-win_amd64.whl#sha256=5dfd3e04dc1c2826d3f404fdc7f93c097901f5da9b91f4f394f79d4e038ed81d
 overrides @ file:///home/conda/feedstock_root/build_artifacts/overrides_1734587627321/work
 packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
 pandas @ file:///D:/bld/pandas_1759265558267/work
@@ -93,6 +96,7 @@ patsy @ file:///home/conda/feedstock_root/build_artifacts/patsy_1733792384640/wo
 pickleshare @ file:///home/conda/feedstock_root/build_artifacts/pickleshare_1733327343728/work
 pillow @ file:///D:/bld/bld/rattler-build_pillow_1758208682/work
 platformdirs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_platformdirs_1756227402/work
+ply==3.11
 pooch @ file:///home/conda/feedstock_root/build_artifacts/pooch_1754941678315/work
 posthog @ file:///home/conda/feedstock_root/build_artifacts/posthog_1758579404340/work
 prometheus_client @ file:///home/conda/feedstock_root/build_artifacts/prometheus_client_1758278110859/work
@@ -104,6 +108,8 @@ pybtex @ file:///home/conda/feedstock_root/build_artifacts/pybtex_1751014981901/
 pycparser @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pycparser_1733195786/work
 Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1750615794071/work
 pyparsing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pyparsing_1758436411/work
+PyQt5==5.15.10
+PyQt5_sip @ file:///C:/b/abs_d1i1jr9fgt/croot/pyqt-split_1736540551157/work/pyqt_sip
 PySide6==6.9.3
 PySocks @ file:///D:/bld/pysocks_1733217287171/work
 python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
@@ -122,10 +128,14 @@ rich @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_rich_
 rpds-py @ file:///D:/bld/bld/rattler-build_rpds-py_1756737437/work
 scikit-fem @ file:///home/conda/feedstock_root/build_artifacts/scikit-fem_1745552011701/work
 scikit-learn @ file:///D:/bld/scikit-learn_1757432804930/work/dist/scikit_learn-1.7.2-cp311-cp311-win_amd64.whl#sha256=933d5b09ab3bb0ad974b8d4f76aa32096213702421cb325514d3c4a7fee3d01e
+scikits-odes @ file:///D:/bld/scikits.odes_1757047774233/work
+scikits-odes-core @ file:///D:/bld/scikits.odes_1757047774233/work/scikits-odes-core
+scikits-odes-sundials @ file:///D:/bld/scikits.odes_1757047774233/work/scikits-odes-sundials
 scipy @ file:///C:/bld/scipy-split_1757681089992/work/dist/scipy-1.16.2-cp311-cp311-win_amd64.whl#sha256=4c6b8707fe730fb7bffdfd223ee752c4c8212cceea2505cad1c28bf63695dc8c
-seaborn @ file:///home/conda/feedstock_root/build_artifacts/seaborn-split_1733730015268/work
+seaborn @ file:///C:/b/abs_0bv5x0ucxb/croot/seaborn_1749110315600/work
 Send2Trash @ file:///D:/bld/send2trash_1733322089150/work
 shiboken6==6.9.3
+sip @ file:///C:/b/abs_b6twfwtueg/croot/sip_1736544693649/work
 six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
 sniffio @ file:///home/conda/feedstock_root/build_artifacts/sniffio_1733244044561/work
 soupsieve @ file:///home/conda/feedstock_root/build_artifacts/soupsieve_1756330469801/work
@@ -154,6 +164,6 @@ webcolors @ file:///home/conda/feedstock_root/build_artifacts/webcolors_17333597
 webencodings @ file:///home/conda/feedstock_root/build_artifacts/webencodings_1733236011802/work
 websocket-client @ file:///home/conda/feedstock_root/build_artifacts/websocket-client_1733157342724/work
 win_inet_pton @ file:///D:/bld/win_inet_pton_1733130564612/work
-xarray @ file:///home/conda/feedstock_root/build_artifacts/xarray_1756981118666/work
+xarray @ file:///home/conda/feedstock_root/build_artifacts/xarray_1759875095301/work
 zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1749421620841/work
 zstandard==0.25.0
