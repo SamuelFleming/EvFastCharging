@@ -55,24 +55,35 @@ def main():
         if col not in rdf.columns:
             raise ValueError(f"RL metrics missing '{col}' in {rl_metrics_path}")
 
-    rl_time_mean = float(rdf["time_s"].mean()) if not rdf.empty else np.nan
-    rl_time_sd   = float(rdf["time_s"].std(ddof=1)) if len(rdf) > 1 else np.nan
-    rl_reached_pct = float(100.0 * rdf["reached"].mean()) if not rdf.empty else np.nan
+    # Episode-time stats (always defined if rows exist)
+    ep_time_mean = float(rdf["time_s"].mean()) if not rdf.empty else np.nan
+    ep_time_sd   = float(rdf["time_s"].std(ddof=1)) if len(rdf) > 1 else np.nan
+
+    # t80 over *reached* episodes only
+    reached_mask = rdf["reached"].astype(bool)
+    rl_t80 = rdf.loc[reached_mask, "time_s"].to_numpy()
+    rl_t80_mean = float(np.mean(rl_t80)) if rl_t80.size else np.nan
+    rl_t80_sd   = float(np.std(rl_t80, ddof=1)) if rl_t80.size > 1 else np.nan
+    rl_reached_pct = float(100.0 * reached_mask.mean()) if not rdf.empty else np.nan
+
+    # violations
     rl_overV_mean  = float(rdf["overV_events"].mean()) if not rdf.empty else np.nan
     rl_overT_mean  = float(rdf["overT_events"].mean()) if not rdf.empty else np.nan
 
     # --- Print a concise report ---
     print("\n=== MVP Evaluation ===")
-    print(f"Baseline t80:  mean={baseline_t80_mean:.1f}s  sd={baseline_t80_sd if np.isfinite(baseline_t80_sd) else float('nan'):.1f}s  (n={baseline_n})")
-    print(f"RL time_s:     mean={rl_time_mean:.1f}s  sd={rl_time_sd if np.isfinite(rl_time_sd) else float('nan'):.1f}s  (n={len(rdf)})")
-    print(f"RL reached %:  {rl_reached_pct:.1f}%")
-    print(f"RL violations: overV={rl_overV_mean:.2f}  overT={rl_overT_mean:.2f}")
+    print(f"Baseline t80:      mean={baseline_t80_mean:.1f}s  sd={baseline_t80_sd if np.isfinite(baseline_t80_sd) else float('nan'):.1f}s  (n={baseline_n})")
+    print(f"RL episode time:   mean={ep_time_mean:.1f}s  sd={ep_time_sd if np.isfinite(ep_time_sd) else float('nan'):.1f}s  (n={len(rdf)})")
+    print(f"RL t80 (reached):  mean={rl_t80_mean if np.isfinite(rl_t80_mean) else float('nan'):.1f}s  sd={rl_t80_sd if np.isfinite(rl_t80_sd) else float('nan'):.1f}s  reached%={rl_reached_pct:.1f}%")
+    print(f"RL violations:     overV={rl_overV_mean:.2f}  overT={rl_overT_mean:.2f}")
     print(f"Sources -> baseline: {base_path.name}   RL: {rl_metrics_path.name}")
 
     # --- Save comparison table ---
     comp = pd.DataFrame([
-        {"metric":"time_to_target_s_mean", "baseline":baseline_t80_mean, "rl":rl_time_mean},
-        {"metric":"time_to_target_s_sd",   "baseline":baseline_t80_sd,   "rl":rl_time_sd},
+        {"metric":"baseline_t80_mean_s",   "baseline":baseline_t80_mean, "rl":rl_t80_mean},
+        {"metric":"t80_sd_s",              "baseline":baseline_t80_sd,   "rl":rl_t80_sd},
+        {"metric":"rl_episode_time_mean_s","baseline":np.nan,            "rl":ep_time_mean},
+        {"metric":"rl_episode_time_sd_s",  "baseline":np.nan,            "rl":ep_time_sd},
         {"metric":"reached_percent",       "baseline":np.nan,            "rl":rl_reached_pct},
         {"metric":"overV_events_mean",     "baseline":np.nan,            "rl":rl_overV_mean},
         {"metric":"overT_events_mean",     "baseline":np.nan,            "rl":rl_overT_mean},
@@ -82,8 +93,9 @@ def main():
 
     # --- Save tiny bar plot (time-to-target) ---
     plt.figure()
-    x = ["Baseline t80", "RL time"]
-    y = [baseline_t80_mean, rl_time_mean]
+    have_rl_t80 = np.isfinite(rl_t80_mean)
+    x = ["Baseline t80", "RL t80" if have_rl_t80 else "RL episode time"]
+    y = [baseline_t80_mean, rl_t80_mean if have_rl_t80 else ep_time_mean]
     plt.bar(x, y)
     plt.ylabel("Seconds")
     plt.title("Time-to-target: Baseline vs RL (MVP)")
@@ -95,8 +107,16 @@ def main():
     # --- Save a JSON summary for quick slide paste ---
     summary = {
         "baseline": {"t80_mean_s": baseline_t80_mean, "t80_sd_s": baseline_t80_sd, "n": baseline_n},
-        "rl": {"time_mean_s": rl_time_mean, "time_sd_s": rl_time_sd, "reached_percent": rl_reached_pct,
-               "overV_mean": rl_overV_mean, "overT_mean": rl_overT_mean, "episodes": int(len(rdf))},
+        "rl": {
+            "episode_time_mean_s": ep_time_mean,
+            "episode_time_sd_s": ep_time_sd,
+            "t80_mean_s": rl_t80_mean,
+            "t80_sd_s": rl_t80_sd,
+            "reached_percent": rl_reached_pct,
+            "overV_mean": rl_overV_mean,
+            "overT_mean": rl_overT_mean,
+            "episodes": int(len(rdf)),
+        },
         "sources": {"baseline_summary": base_path.name, "rl_metrics": rl_metrics_path.name},
     }
     (args.outdir / "mvp_summary.json").write_text(json.dumps(summary, indent=2))
