@@ -1,0 +1,13 @@
+# src/rl/rewards/r1_penalty.py
+from __future__ import annotations
+from dataclasses import dataclass
+
+@dataclass
+class SoHAwareVmax:
+    Vmax_nominal: float           # e.g., 4.2
+    k_drop_perc: float = 0.10     # 10% drop at SoH=0 (linear)
+
+    def __call__(self, soh: float) -> float:
+        s = max(0.0, min(1.0, float(soh)))
+        # Vmax_eff = Vmax_nominal * (1 - k*(1 - SoH))
+        return self.Vmax_nominal * (1.0 - self.k_drop_perc * (1.0 - s))
