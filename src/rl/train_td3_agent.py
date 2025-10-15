@@ -1,4 +1,6 @@
 # src/rl/train_td3_agent.py
+from __future__ import annotations
+
 import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -6,7 +8,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import matplotlib
 matplotlib.use("Agg")
 
-from __future__ import annotations
+
 import os, json, time
 from pathlib import Path
 import numpy as np
@@ -18,6 +20,7 @@ from stable_baselines3.common.noise import NormalActionNoise
 
 from src.rl.ev_charging_env import EVChargingEnv
 from src.rl.callbacks import EpisodeLogger
+from src.rl.rewards.r1_penalty import SoHAwareVmax
 
 def main():
     outdir = Path("data/processed/rl/mvp_td3")
@@ -31,6 +34,11 @@ def main():
         action_bounds_C=(-0.05, 4.0),
         lambda_V=10.0, lambda_T=10.0
     )
+
+    # Make Vmax SoH-aware (10% drop at SoH=0 → gentle effect)
+    env.vmax_fn = SoHAwareVmax(Vmax_nominal=env.V_max, k_drop_perc=0.10)
+    # Optional: force a demo SoH value (otherwise it uses metadata SoH or 1.0)
+    # env.soh = 0.90
 
     # ----- TD3 config -----
     n_episodes = 2

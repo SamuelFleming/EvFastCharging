@@ -7,6 +7,7 @@ from typing import Dict, Any, Tuple, Optional
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from typing import Callable, Optional
 
 from src.utils.data_interface import load_mvp_tables
 
@@ -50,6 +51,7 @@ class SurrogateBackend(SimulatorBackend):
         self.p = params or SurrogateParams()
         self.state = {"soc": 0.2, "T": self.p.Tamb_C, "V": 3.6}
         self.t = 0.0
+        
 
     # Smooth OCV curve (logistic blend + logs); clipped to plausible range
     def _ocv(self, soc: float) -> float:
@@ -111,7 +113,9 @@ class EVChargingEnv(gym.Env):
                  action_bounds_C: Tuple[float,float] = (-0.05, 4.0),
                  lambda_V: float = 10.0,
                  lambda_T: float = 10.0,
-                 backend: Optional[SimulatorBackend] = None):
+                 backend: Optional[SimulatorBackend] = None,
+                 soh: Optional[float] = None,
+                 vmax_fn: Optional[Callable[[float], float]] = None):
         super().__init__()
         # Load meta (V_max, T_max)
         _, _, meta = load_mvp_tables(processed_dir, with_soh="none")
@@ -121,6 +125,8 @@ class EVChargingEnv(gym.Env):
         self.target_soc = float(target_soc)
         self.lambda_V = float(lambda_V)
         self.lambda_T = float(lambda_T)
+        self.soh = float(meta.get("SoH", 1.0)) if soh is None else float(soh)
+        self.vmax_fn = vmax_fn
 
         # Backend
         self.backend = backend or SurrogateBackend(self.V_max, self.T_max, self.target_soc)
@@ -147,15 +153,28 @@ class EVChargingEnv(gym.Env):
         obs_d, terminated, info = self.backend.step(a, self.dt_s)
         dSoC = float(obs_d["SoC"] - self._last_soc)
         self._last_soc = obs_d["SoC"]
-        # reward
-        penalty = self.lambda_V * info["overV"] + self.lambda_T * info["overT"]
+        
+         # --- SoH-aware voltage ceiling (override backend overV) ---
+        vmax_eff = self.vmax_fn(self.soh) if self.vmax_fn is not None else self.V_max
+        overV_eff = 1 if obs_d["V"] > vmax_eff else 0
+
+        # reward (use SoH-aware overV)
+        penalty = self.lambda_V * overV_eff + self.lambda_T * info["overT"]
         reward = -self.dt_s - penalty
+
+        # recompute termination with SoH-aware overV
+        terminated = bool(overV_eff or info["overT"] or info["reached"] or obs_d["SoC"] >= 0.999)
+
         # Gym step return
         obs = np.array([obs_d["SoC"], dSoC, obs_d["V"], obs_d["T"]], dtype=np.float32)
         truncated = False
         return obs, reward, terminated, truncated, {
-            "t_s": info["t_s"], "overV": info["overV"], "overT": info["overT"],
-            "reached": info["reached"], "I_A": info["I_A"]
+            "t_s": info["t_s"],
+            "overV": overV_eff,          # SoH-aware
+            "overT": info["overT"],
+            "reached": info["reached"],
+            "I_A": info["I_A"],
+            "Vmax_eff": vmax_eff,        # helpful for debugging/plots
         }
 
     # Optional helper to compute episode metrics
