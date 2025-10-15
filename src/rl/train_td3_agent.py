@@ -1,4 +1,11 @@
 # src/rl/train_td3_agent.py
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import matplotlib
+matplotlib.use("Agg")
+
 from __future__ import annotations
 import os, json, time
 from pathlib import Path
@@ -26,8 +33,8 @@ def main():
     )
 
     # ----- TD3 config -----
-    n_episodes = 15
-    steps_per_ep = 1800          # 30 minutes horizon @ 1 s
+    n_episodes = 2
+    steps_per_ep = 800          # 30 minutes horizon @ 1 s
     total_steps = n_episodes * steps_per_ep
 
     # Exploration noise (small; action in C-rate)
@@ -52,50 +59,7 @@ def main():
 
     model.learn(total_timesteps=total_steps, callback=callback, progress_bar=True)
 
-    # ----- Training loop (episode-aware logging) -----
-    ep_metrics = []
-    returns = []
-    obs, _ = env.reset(seed=42)
-    ep_return = 0.0
-    ep_infos = []
-
-    for step in range(total_steps):
-        # 1) act
-        action, _ = model.predict(obs, deterministic=False)
-
-        # 2) env step
-        next_obs, reward, terminated, truncated, info = env.step(action)
-
-        # 3) store transition in replay buffer
-        done_flag = bool(terminated or truncated)
-        # SB3 expects obs, next_obs, action, reward, done, infos=[info]
-        model.replay_buffer.add(
-            obs,
-            next_obs,
-            action,
-            reward,
-            done_flag,
-            infos=[info],  # <-- list, not None
-        )
-
-        # 4) one gradient step
-        model.train(gradient_steps=1, batch_size=model.batch_size)
-
-        # 5) bookkeeping
-        ep_return += float(reward)
-        ep_infos.append(info)
-        obs = next_obs  # advance
-
-        # 6) episode end (either env terminated or we hit the fixed horizon)
-        if done_flag or ((step + 1) % steps_per_ep == 0):
-            metrics = env.compute_metrics(ep_infos, target_soc=env.target_soc)
-            returns.append(ep_return)
-            ep_metrics.append(metrics)
-
-            # reset episode
-            obs, _ = env.reset()
-            ep_return = 0.0
-            ep_infos = []
+    
 
     # ----- Save artefacts -----
     ts = time.strftime("%Y%m%d_%H%M%S")
