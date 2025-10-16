@@ -23,14 +23,19 @@ from src.rl.callbacks import EpisodeLogger
 from src.rl.rewards.r1_penalty import SoHAwareVmax
 
 def main():
-    outdir = Path("data/processed/rl/mvp_td3")
+    base_out = Path("data/processed/rl/mvp_td3")
+    base_out.mkdir(parents=True, exist_ok=True)
+
+    # Create a per-run subfolder (timestamp)
+    run_ts = time.strftime("%Y%m%d_%H%M%S")
+    outdir = base_out / run_ts
     outdir.mkdir(parents=True, exist_ok=True)
 
     # ----- Env params (MVP) -----
     env = EVChargingEnv(
         processed_dir="data/processed",
         dt_s=1.0,
-        target_soc=0.8,          # you can set 0.6 while you’re on CC-only baseline, if you prefer
+        target_soc=0.6,          # you can set 0.6 while you’re on CC-only baseline, if you prefer
         action_bounds_C=(-0.05, 4.0),
         lambda_V=10.0, lambda_T=10.0
     )
@@ -38,11 +43,11 @@ def main():
     # Make Vmax SoH-aware (10% drop at SoH=0 → gentle effect)
     env.vmax_fn = SoHAwareVmax(Vmax_nominal=env.V_max, k_drop_perc=0.10)
     # Optional: force a demo SoH value (otherwise it uses metadata SoH or 1.0)
-    # env.soh = 0.90
+    env.soh = 0.75
 
     # ----- TD3 config -----
-    n_episodes = 2
-    steps_per_ep = 800          # 30 minutes horizon @ 1 s
+    n_episodes = 10
+    steps_per_ep = 1800          # 30 minutes horizon @ 1 s
     total_steps = n_episodes * steps_per_ep
 
     # Exploration noise (small; action in C-rate)
@@ -63,7 +68,7 @@ def main():
     )
 
     returns, ep_metrics = [], []
-    callback = EpisodeLogger(env, steps_per_ep, returns, ep_metrics)
+    callback = EpisodeLogger(env, steps_per_ep, returns, ep_metrics, outdir=outdir)
 
     model.learn(total_timesteps=total_steps, callback=callback, progress_bar=True)
 
@@ -88,14 +93,57 @@ def main():
     plt.savefig(outdir / f"td3_returns_{ts}.png", dpi=140)
     plt.close()
 
-    # Simple text summary
+    # ✅ Make the V–SoC plot if a trajectory exists
+    traj_files = sorted(outdir.glob("episode_traj_*.csv"))
+    if traj_files:
+        traj = pd.read_csv(traj_files[-1]).dropna(subset=["SoC", "V"])
+        if not traj.empty:
+            plt.figure()
+            plt.plot(traj["SoC"], traj["V"])
+            plt.xlabel("SoC"); plt.ylabel("Voltage [V]")
+            plt.title("RL Policy: V vs SoC (one episode)")
+            plt.tight_layout()
+            plt.savefig(outdir / "rl_v_vs_soc.png", dpi=140)
+            plt.close()
+
+    # Enriched summary (with knobs)
     summary = {
         "episodes": len(returns),
         "mean_return": float(np.mean(returns)) if returns else None,
         "mean_time_s": float(np.mean(mdf["time_s"])) if not mdf.empty else None,
         "reached_frac": float(np.mean(mdf["reached"])) if not mdf.empty else None,
+        "knobs": {
+            "env": {
+                "dt_s": float(env.dt_s),
+                "target_soc": float(env.target_soc),
+                "lambda_V": float(env.lambda_V),
+                "lambda_T": float(env.lambda_T),
+                "action_bounds_C": [float(env.action_low), float(env.action_high)],
+                "soh": float(getattr(env, "soh", 1.0)),
+                "V_max_nominal": float(env.V_max),
+                "T_max": float(env.T_max),
+                "k_drop_perc": float(getattr(env.vmax_fn, "k_drop_perc", np.nan)) if env.vmax_fn else None,
+            },
+            "algo": {
+                "algo": "TD3",
+                "total_steps": int(total_steps),
+                "episodes": int(n_episodes),
+                "steps_per_ep": int(steps_per_ep),
+                "learning_rate": 1e-3,
+                "batch_size": int(model.batch_size),
+                "action_noise_sigma": 0.2,
+                "net_arch": [128, 128],
+            },
+        },
+        "artifacts": {
+            "model_zip": model_path.name,
+            "metrics_csv": "td3_episode_metrics.csv",
+            "returns_png": "td3_returns.png",
+            "traj_csv": traj_files[-1].name if traj_files else None,
+            "v_soc_png": "rl_v_vs_soc.png" if traj_files else None,
+        }
     }
-    (outdir / f"td3_summary_{ts}.json").write_text(json.dumps(summary, indent=2))
+    (outdir / "td3_summary.json").write_text(json.dumps(summary, indent=2))
     print("Saved TD3 artefacts to", outdir)
 
 if __name__ == "__main__":

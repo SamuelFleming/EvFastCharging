@@ -175,6 +175,8 @@ class EVChargingEnv(gym.Env):
             "reached": info["reached"],
             "I_A": info["I_A"],
             "Vmax_eff": vmax_eff,        # helpful for debugging/plots
+            "SoC": obs_d["SoC"],         # <-- add this
+            "V":   obs_d["V"],           # <-- and this
         }
 
     # Optional helper to compute episode metrics
