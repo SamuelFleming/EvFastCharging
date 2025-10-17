@@ -1,0 +1,104 @@
+{
+  "schema_version": "0",
+  "dataset_id": "nasa_fy08q4_b0005",
+  "run_id": "2025-10-17T00:00:00Z",
+  "created_at_utc": "2025-10-17T00:00:00Z",
+
+  "provenance": {
+    "raw_root": "C:/Users/User/OneDrive/Desktop/Tech Projects/EvFastChargingRL/data/raw/NASABatteryAging",
+    "subsets": ["1. BatteryAgingARC-FY08Q4"],
+    "raw_files": [
+      "1. BatteryAgingARC-FY08Q4/B0005.mat"
+    ],
+    "discovery_source": "manual",
+    "discharge_discovery": {
+      "method": "list_mat_files",
+      "default_file_limit": 5,
+      "cli_limit_arg_wired": false,
+      "note": "Current SoH table includes multiple batteries due to default discovery; align via raw_files later."
+    }
+  },
+
+  "extraction_config": {
+    "resample_dt_s": 1.0,
+    "soc_method": "coulomb_counting",
+    "nominal_capacity_Ah": 2.0,
+    "charge_protocol": {
+      "mode": "CC-CV",
+      "cv_voltage_V": 4.2
+    },
+    "soc_target": 0.8,
+    "limits": {
+      "V_max": 4.2,
+      "T_max": 45.0,
+      "C_max_Crate": 4.0
+    },
+    "units": {
+      "V": "V",
+      "I": "A",
+      "T_cell": "C",
+      "SoC": "pct",
+      "dt": "s"
+    }
+  },
+
+  "stats": {
+    "row_counts": {
+      "tbl1": 2285607,
+      "tbl2": 338,
+      "soh_table": 664
+    },
+    "entities": {
+      "batteries": 1,
+      "cycles": {
+        "charge": 338,
+        "discharge": 664
+      }
+    },
+    "ranges": {
+      "V_min": 0.0033652442238818,
+      "V_max": 8.393141180564633,
+      "I_min": -4.4796596195981975,
+      "I_max": 1.5313014269745342,
+      "T_cell_min": 23.214801785728056,
+      "T_cell_max": 41.45023191903855,
+      "SoC_min": 0.0,
+      "SoC_max": 0.9233383337928016,
+      "C_rate_min": -2.2398298097990987,
+      "C_rate_max": 0.7656507134872671
+    }
+  },
+
+  "soh": {
+    "capacity_rule": [
+      "prefer scalar Capacity (Ah) if present",
+      "else max(Capacity array) if present",
+      "else trapz(|I|, t) / 3600"
+    ],
+    "reference_rule": "first_discharge_cycle_per_battery",
+    "merge_keys": ["battery_id", "cycle_id"],
+    "ambient_source_fields": ["ambient_temperature", "ambient_T", "ambient"],
+    "capacity_units": "Ah"
+  },
+  
+  "eda": {
+    "outdir_default": "data/processed/figures",
+    "column_contract": {
+      "required": ["t","V","I","T_cell","battery_id","cycle_id"],
+      "optional": ["SoC","dSoC","C_rate","subset"]
+    },
+    "downsample_rows_series": 20000,
+    "correlation_sample_cap": 50000,
+    "cv_tail_v_thresh_default_V": 4.15,
+    "crate_hist": { "bins": 60, "clip_min": -5, "clip_max": 10 },
+    "writes_summary_json": true
+  },
+
+  "notes": [
+    "FY08Q4 subset: baseline room-temperature aging; CC 2A discharge style per README.",
+    "CSV column contract follows Tbl1/Tbl2 from make_tables.py.",
+    "Discharge file enumeration defaults to list_mat_files(limit=5) when not provided explicitly.",
+    "SoH is computed after grouping by battery and sorting by cycle_id; SoH = cap / first_cap.",
+    "Tbl1 flags use thresholds V>4.2V and T_cell>45C."
+  ]
+}
