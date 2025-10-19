@@ -1,6 +1,7 @@
 # src/nasa_data_extract/extract_discharge_cycles.py
 from __future__ import annotations
 from pathlib import Path
+from typing import Iterable, Optional, List
 import pandas as pd
 import numpy as np
 from .read import get_root, load_mat_safely, iter_cycles, get_field, list_mat_files
@@ -53,12 +54,25 @@ def extract_discharge_capacity_from_file(path: Path) -> pd.DataFrame:
 
     return pd.DataFrame(records)
 
-def build_discharge_capacity_table(files=None) -> pd.DataFrame:
+def build_discharge_capacity_table(files: Optional[Iterable[str | Path]] = None) -> pd.DataFrame:
     root = get_root()
     print(f"[build_discharge_capacity_table] Root = {root}")
-    mats = files or list_mat_files(limit=5)
-    print(f"Found {len(mats)} candidate .mat files:")
-    for p in mats:
+
+    mats: List[Path]
+    if files is not None:
+        mats = [Path(p) for p in files]
+        mats = [p if p.is_absolute() else p for p in mats]  # keep relative if caller passed relative to raw_root
+        mats = [p.resolve() if p.exists() else p for p in mats]  # resolve where possible
+        if len(mats) == 0:
+            print("[build_discharge_capacity_table] Provided file list is empty → falling back to legacy discovery.")
+            mats = list_mat_files(limit=5)
+        else:
+            print(f"[build_discharge_capacity_table] Using explicit file list from caller: {len(mats)} file(s).")
+    else:
+        mats = list_mat_files(limit=5)
+        print(f"[build_discharge_capacity_table] Legacy discovery selected {len(mats)} file(s) (limit=5).")
+
+    for p in mats[:10]:
         print(" •", p)
 
     dfs = []
@@ -84,5 +98,6 @@ if __name__ == "__main__":
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)
     print(f"Wrote debug discharge table: {out}")
+
 
 
