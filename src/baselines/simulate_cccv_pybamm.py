@@ -149,7 +149,7 @@ def _infer_nominal_capacity_Ah(param_values: pybamm.ParameterValues) -> Optional
 # ----------------------------
 # Core simulation routine
 # ----------------------------
-def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
+def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary, str, bool]:
     """Run a single CC–CV charge in PyBaMM and return (timeseries_df, summary)."""
     # --- Model & options ---
     options = {"thermal": cfg.thermal}
@@ -186,6 +186,8 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
         f"Hold at {cfg.v_max} V until {cut_str}",
     ])
 
+    solver_backend = "unkown"
+    cc_only = False
     # --- Solver chain ---
     solve_ok = False
     last_err = None
@@ -195,6 +197,7 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
         solver = pybamm.CasadiSolver(mode="safe")
         sim = pybamm.Simulation(model=model, parameter_values=param_values, experiment=exp, solver=solver)
         sol = sim.solve()
+        solver_backend = "casadi"
         solve_ok = True
     except Exception as e:
         print("[WARN] CasADi (default) failed:", repr(e))
@@ -207,6 +210,7 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
             solver = IDAKLUSolver()
             sim = pybamm.Simulation(model=model, parameter_values=param_values, experiment=exp, solver=solver)
             sol = sim.solve()
+            solver_backend = "idaklu"
             solve_ok = True
         except Exception as e:
             print("[WARN] IDAKLUSolver failed or unavailable:", repr(e))
@@ -223,6 +227,8 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
             solver = pybamm.ScipySolver(method="BDF", rtol=1e-6, atol=1e-8)
             sim = pybamm.Simulation(model=model, parameter_values=param_values, experiment=exp_cc_only, solver=solver)
             sol = sim.solve()
+            solver_backend = "spm_scipy_fallback"
+            cc_only = True
             solve_ok = True
         except Exception as e:
             last_err = e
@@ -301,7 +307,7 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary]:
         reached_target=reached,
         termination=term,
     )
-    return df, summary
+    return df, summary, solver_backend, cc_only
 
 
 # ----------------------------
@@ -465,6 +471,8 @@ def main():
     # Run sweeps
     all_runs: List[pd.DataFrame] = []
     summaries: List[RunSummary] = []
+    backends: set[str] = set()
+    any_cc_only = False
 
     for s0 in args.soc_inits:
         for c in args.cc_c:
@@ -480,9 +488,11 @@ def main():
                 subset=str(meta_tbl.get("subset", "unknown")),
             )
             print(f"[CCCV] sim: SoC0={cfg.soc_init:.2f}, CC={cfg.c_rate:.2g}C, Vmax={cfg.v_max:.2f}V, Icut={cfg.i_cut_c:.3g}C, thermal={cfg.thermal}, set={cfg.param_set}")
-            df, summ = simulate_cccv_single(cfg)
+            df, summ, backend, cc_only = simulate_cccv_single(cfg)
             all_runs.append(df)
             summaries.append(summ)
+            backends.add(backend)
+            any_cc_only = any_cc_only or cc_only
 
     # Export timeseries
     ts_path = outdir / "baseline_cccv_results.csv"
@@ -524,6 +534,8 @@ def main():
         "i_cut_c": float(args.i_cut_c),
         "soc_inits": list(map(float, args.soc_inits)),
         "cc_c": list(map(float, args.cc_c)),
+        "solver_backends": sorted(backends),    # e.g., ["spm_scipy_fallback"]
+        "cc_only_fallback": bool(any_cc_only),  # True if any sweep member used fallback
         "live_dataset_snapshot": snapshot_name if live_meta else None,
         "results_csv": "baseline_cccv_results.csv",
         "summary_csv": "baseline_cccv_summary.csv",
