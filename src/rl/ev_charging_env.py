@@ -1,15 +1,16 @@
 # src/rl/ev_charging_env.py
 from __future__ import annotations
-import math, json, random
+import math, random
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Callable
 
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from typing import Callable, Optional
 
 from src.utils.data_interface import load_mvp_tables
+from src.rl.rewards.base_reward import BaseReward
+from src.rl.rewards.r1_penalty import R1Penalty
 
 # ---------------------------
 # Backend interface
@@ -51,9 +52,7 @@ class SurrogateBackend(SimulatorBackend):
         self.p = params or SurrogateParams()
         self.state = {"soc": 0.2, "T": self.p.Tamb_C, "V": 3.6}
         self.t = 0.0
-        
 
-    # Smooth OCV curve (logistic blend + logs); clipped to plausible range
     def _ocv(self, soc: float) -> float:
         s = min(max(soc, 1e-6), 1 - 1e-6)
         ocv = 3.2 + 0.9*s + 0.25*math.log(s) - 0.2*math.log(1 - s)
@@ -76,7 +75,7 @@ class SurrogateBackend(SimulatorBackend):
         # Electrical model
         V_oc = self._ocv(soc)
         V = V_oc - I_A * self.p.R_ohm
-        # Thermal (Joule heating I^2 R, lumped cooling)
+        # Thermal
         T = self.state["T"]
         q_gen = (I_A**2) * self.p.R_ohm             # W
         q_loss = self.p.h_W_per_K * (T - self.p.Tamb_C)
@@ -102,7 +101,7 @@ class EVChargingEnv(gym.Env):
     """
     Observation: [SoC, dSoC, V, T]
     Action: C-rate in [action_low, action_high]
-    Reward: -dt - λV*[V>Vmax] - λT*[T>Tmax]
+    Reward: provided by a Reward implementation (R1/R2)
     """
     metadata = {"render.modes": []}
 
@@ -111,25 +110,23 @@ class EVChargingEnv(gym.Env):
                  dt_s: float = 1.0,
                  target_soc: float = 0.8,
                  action_bounds_C: Tuple[float,float] = (-0.05, 4.0),
-                 lambda_V: float = 10.0,
-                 lambda_T: float = 10.0,
+                 reward_impl: Optional[BaseReward] = None,
                  backend: Optional[SimulatorBackend] = None,
-                 soh: Optional[float] = None,
-                 vmax_fn: Optional[Callable[[float], float]] = None):
+                 soh: Optional[float] = None):
         super().__init__()
         # Load meta (V_max, T_max)
         _, _, meta = load_mvp_tables(processed_dir, with_soh="none")
-        self.V_max = float(meta.get("V_max", 4.2))
+        self.V_max = float(meta.get("V_max", 3.65))
         self.T_max = float(meta.get("T_max", 55.0))
         self.dt_s = float(dt_s)
         self.target_soc = float(target_soc)
-        self.lambda_V = float(lambda_V)
-        self.lambda_T = float(lambda_T)
         self.soh = float(meta.get("SoH", 1.0)) if soh is None else float(soh)
-        self.vmax_fn = vmax_fn
 
         # Backend
         self.backend = backend or SurrogateBackend(self.V_max, self.T_max, self.target_soc)
+
+        # Reward
+        self.reward_impl: BaseReward = reward_impl or R1Penalty()
 
         # Spaces
         self.action_low, self.action_high = action_bounds_C
@@ -150,40 +147,57 @@ class EVChargingEnv(gym.Env):
 
     def step(self, action):
         a = float(np.clip(action[0], self.action_low, self.action_high))
-        obs_d, terminated, info = self.backend.step(a, self.dt_s)
+        obs_d, _, info_backend = self.backend.step(a, self.dt_s)
+
         dSoC = float(obs_d["SoC"] - self._last_soc)
         self._last_soc = obs_d["SoC"]
-        
-         # --- SoH-aware voltage ceiling (override backend overV) ---
-        vmax_eff = self.vmax_fn(self.soh) if self.vmax_fn is not None else self.V_max
-        overV_eff = 1 if obs_d["V"] > vmax_eff else 0
 
-        # reward (use SoH-aware overV)
-        penalty = self.lambda_V * overV_eff + self.lambda_T * info["overT"]
-        reward = -self.dt_s - penalty
+        # Compose state & limits for the reward
+        state = {
+            "SoC": obs_d["SoC"], "dSoC": dSoC, "V": obs_d["V"], "T": obs_d["T"],
+            "Nep": None,  # not modelled in surrogate yet
+            "SoH": self.soh,
+        }
+        limits = {"V_max_nominal": self.V_max, "T_max": self.T_max}
 
-        # recompute termination with SoH-aware overV
-        terminated = bool(overV_eff or info["overT"] or info["reached"] or obs_d["SoC"] >= 0.999)
+        reward, info_upd = self.reward_impl(dt_s=self.dt_s, state=state, action=a, limits=limits)
+        Vmax_eff = info_upd.get("Vmax_eff", self.V_max)
+
+        # Termination: SoH-aware violations OR reached target OR SoC ceiling
+        reached = 1 if obs_d["SoC"] >= self.target_soc else 0
+        overV_eff = int(info_upd.get("overV", 0))
+        overT_eff = int(info_upd.get("overT", 0))
+        terminated = bool(overV_eff or overT_eff or reached or obs_d["SoC"] >= 0.999)
 
         # Gym step return
         obs = np.array([obs_d["SoC"], dSoC, obs_d["V"], obs_d["T"]], dtype=np.float32)
         truncated = False
-        return obs, reward, terminated, truncated, {
-            "t_s": info["t_s"],
-            "overV": overV_eff,          # SoH-aware
-            "overT": info["overT"],
-            "reached": info["reached"],
-            "I_A": info["I_A"],
-            "Vmax_eff": vmax_eff,        # helpful for debugging/plots
-            "SoC": obs_d["SoC"],         # <-- add this
-            "V":   obs_d["V"],           # <-- and this
+        info = {
+            "t_s": info_backend["t_s"],
+            "overV": overV_eff,
+            "overT": overT_eff,
+            "reached": reached,
+            "I_A": info_backend["I_A"],
+            "Vmax_eff": Vmax_eff,
+            "SoC": obs_d["SoC"],
+            "V":   obs_d["V"],
+            "T":   obs_d["T"],
+            "nep_zero_event": int(info_upd.get("nep_zero_event", 0)),
         }
+        return obs, reward, terminated, truncated, info
 
-    # Optional helper to compute episode metrics
+    # Episode metrics aggregator
     @staticmethod
     def compute_metrics(episode_infos: list[dict], target_soc: float) -> Dict[str, Any]:
         t_last = episode_infos[-1]["t_s"] if episode_infos else 0.0
         reached = any(info.get("reached", 0) for info in episode_infos)
         v_viol = sum(info.get("overV", 0) for info in episode_infos)
         t_viol = sum(info.get("overT", 0) for info in episode_infos)
-        return {"time_s": t_last, "reached": int(reached), "overV_events": v_viol, "overT_events": t_viol}
+        n_viol = sum(info.get("nep_zero_event", 0) for info in episode_infos)
+        return {
+            "time_s": t_last,
+            "reached": int(reached),
+            "overV_events": v_viol,
+            "overT_events": t_viol,
+            "nep_zero_events": n_viol,
+        }
