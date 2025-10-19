@@ -33,27 +33,49 @@ def load_rl_metrics_path(rl_dir: Path | None, rl_run_dir: Path | None) -> Path:
     Resolve the RL metrics CSV path under either:
       - explicit run dir (preferred), or
       - latest subfolder under rl_dir, or
-      - legacy flat file td3_episode_metrics_*.csv under rl_dir.
+      - legacy flat CSV under rl_dir.
+    Raises with a clear message if no metrics are found.
     """
     root = rl_dir or Path("data/processed/rl/mvp_td3")
-    # prefer explicit run_dir if given
+
+    # 1) Prefer explicit run dir, else newest subfolder
     run = rl_run_dir or find_latest_run_dir(root)
     if run is None:
-        raise FileNotFoundError(f"No RL run folder found under {root}")
+        raise FileNotFoundError(
+            f"No RL run folder found under {root}. "
+            f"If you have an older layout, pass --rl-run-dir explicitly."
+        )
 
-    # accepted patterns (new first)
+    # 2) Try common metrics filenames inside the run folder
     patterns = [
         "td3_episode_metrics.csv",
         "td3_episode_metrics_*.csv",
-        "*episode_metrics*.csv",  # fallback catch-all
+        "*episode_metrics*.csv",
     ]
     for pat in patterns:
         hits = sorted(run.glob(pat))
         if hits:
-            return hits[-1]  # newest match
+            return hits[-1]
 
+    # 3) Legacy: some older scripts wrote metrics to the root instead of the run dir
+    for pat in patterns:
+        hits = sorted(root.glob(pat))
+        if hits:
+            return hits[-1]
+
+    # 4) Give a helpful error including what we *did* find
+    found = []
+    if (run / "td3_summary.json").exists():
+        found.append(str(run / "td3_summary.json"))
     raise FileNotFoundError(
-        f"No RL metrics found. Looked for {patterns} under {run}"
+        "No RL metrics CSV found.\n"
+        f"  Checked run dir: {run}\n"
+        f"  Checked root:    {root}\n"
+        f"  Expected one of: {patterns}\n"
+        + ("  Found only: " + ", ".join(found) if found else "")
+        + "\nTo proceed, run a short RL training to produce td3_episode_metrics.csv, e.g.:\n"
+        "  python -m src.rl.train_td3_agent\n"
+        "Or pass --rl-run-dir pointing to a run that contains the metrics CSV."
     )
 
 def main():
