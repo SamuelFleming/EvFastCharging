@@ -8,7 +8,12 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from src.utils.data_interface import load_mvp_tables
+from src.utils.data_interface import (
+    load_mvp_tables,
+    load_dataset_meta_from_processed,
+    get_limits,
+    sample_episode_context,
+)
 from src.rl.rewards.base_reward import BaseReward
 from src.rl.rewards.r1_penalty import R1Penalty
 
@@ -52,6 +57,9 @@ class SurrogateBackend(SimulatorBackend):
         self.p = params or SurrogateParams()
         self.state = {"soc": 0.2, "T": self.p.Tamb_C, "V": 3.6}
         self.t = 0.0
+
+    def set_ambient(self, Tamb_C: float):
+        self.p.Tamb_C = float(Tamb_C)
 
     def _ocv(self, soc: float) -> float:
         s = min(max(soc, 1e-6), 1 - 1e-6)
@@ -115,12 +123,16 @@ class EVChargingEnv(gym.Env):
                  soh: Optional[float] = None):
         super().__init__()
         # Load meta (V_max, T_max)
-        _, _, meta = load_mvp_tables(processed_dir, with_soh="none")
-        self.V_max = float(meta.get("V_max", 3.65))
-        self.T_max = float(meta.get("T_max", 55.0))
+        # Load shared limits (Tbl3 and/or live_dataset.json)
+        lims = get_limits(processed_dir)
+        self.V_max = float(lims["V_max"])
+        self.T_max = float(lims["T_max"])
         self.dt_s = float(dt_s)
         self.target_soc = float(target_soc)
-        self.soh = float(meta.get("SoH", 1.0)) if soh is None else float(soh)
+
+        # Keep dataset meta around for episode sampling
+        self.dataset_meta = load_dataset_meta_from_processed(processed_dir)
+        self.soh = float(self.dataset_meta.get("SoH", 1.0)) if soh is None else float(soh)
 
         # Backend
         self.backend = backend or SurrogateBackend(self.V_max, self.T_max, self.target_soc)
@@ -140,7 +152,19 @@ class EVChargingEnv(gym.Env):
         self._last_soc = None
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+        ctx = sample_episode_context(self.dataset_meta)  # {"soc0","temp_C","soh"}
+        self.backend.set_ambient(ctx["temp_C"])
         obs_dict = self.backend.reset(seed=seed)
+
+        # Overwrite initial SoC to match sampled soc0
+        obs_dict["SoC"] = float(ctx["soc0"])
+        self.backend.state["soc"] = float(ctx["soc0"])
+        self.backend.state["V"] = self.backend._ocv(float(ctx["soc0"]))
+
+        # Use sampled SoH for this episode unless user forced a value
+        if "SoH" not in self.__dict__ or self.soh is None:
+            self.soh = float(ctx["soh"])
+
         self._last_soc = obs_dict["SoC"]
         obs = np.array([obs_dict["SoC"], 0.0, obs_dict["V"], obs_dict["T"]], dtype=np.float32)
         return obs, {}
@@ -200,4 +224,5 @@ class EVChargingEnv(gym.Env):
             "overV_events": v_viol,
             "overT_events": t_viol,
             "nep_zero_events": n_viol,
+            "delta_soh_proxy": float("nan"),
         }
