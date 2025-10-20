@@ -88,7 +88,7 @@ def main():
     run_ts = time.strftime("%Y%m%d_%H%M%S")
     slug = (args.run_name.strip().replace(" ", "_") if args.run_name else None)
     run_id = f"{run_ts}_{slug}" if slug else run_ts
-    run_dir = args.out_root / slug
+    run_dir = args.out_root / (slug or run_ts)  # fall back to timestamp
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # ----- One-liner config banner -----

@@ -139,8 +139,18 @@ class EVChargingEnv(gym.Env):
         self.dataset_meta = load_dataset_meta_from_processed(processed_dir)
         self.soh = float(self.dataset_meta.get("SoH", 1.0)) if soh is None else float(soh)
 
+        #Add counters
+        self._overV_count = 0
+        self._overT_count = 0
+        self._viol_term_thresh = 3  # terminate only if sustained for 3 ticks
+
         # Backend
-        self.backend = backend or SurrogateBackend(self.V_max, self.T_max, self.target_soc)
+        cap = float(lims.get("capacity_Ah", 3.0))
+        if backend is None:
+            params = SurrogateParams(cap_Ah=cap)
+            self.backend = SurrogateBackend(self.V_max, self.T_max, self.target_soc, params=params)
+        else:
+            self.backend = backend
 
         # Reward
         self.reward_impl: BaseReward = reward_impl or R1Penalty()
@@ -167,7 +177,7 @@ class EVChargingEnv(gym.Env):
         self.backend.state["V"] = self.backend._ocv(float(ctx["soc0"]))
 
         # Use sampled SoH for this episode unless user forced a value
-        if "SoH" not in self.__dict__ or self.soh is None:
+        if not hasattr(self, "soh") or self.soh is None:
             self.soh = float(ctx["soh"])
 
         self._last_soc = float(obs_dict["SoC"])
@@ -208,20 +218,28 @@ class EVChargingEnv(gym.Env):
         overV_eff = int(obs_d["V"] > Vmax_eff)
         overT_eff = int(obs_d["T"] > self.T_max)
 
+        self._overV_count = (self._overV_count + 1) if overV_eff else 0
+        self._overT_count = (self._overT_count + 1) if overT_eff else 0
+
         # 7) Termination & truncation (true terminals: any over-limit or reached target)
         reached = 1 if obs_d["SoC"] >= self.target_soc else 0
         self._steps += 1
         timeout = int(self._steps >= self.max_steps)
 
-        terminated = bool(overV_eff or overT_eff or reached or obs_d["SoC"] >= 0.999)
+        sustained_violation = (self._overV_count >= self._viol_term_thresh) or (self._overT_count >= self._viol_term_thresh)
+        terminated = bool(sustained_violation or reached or obs_d["SoC"] >= 0.999)
         truncated  = bool(timeout and not terminated)
 
         # 8) Terminal bonus (only when we truly reached the target)
         if reached:
             reward += self.reach_bonus
+            # After computing reward (and possibly adding reach_bonus), sanitize:
+        reward = float(np.nan_to_num(reward, nan=-1e6, posinf=-1e6, neginf=-1e6))
 
         # 9) Observation vector and info
+        # Build obs then sanitize:
         obs = np.array([obs_d["SoC"], dSoC, obs_d["V"], obs_d["T"]], dtype=np.float32)
+        obs = np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         info = {
             "t_s": info_backend["t_s"],
             "overV": overV_eff,

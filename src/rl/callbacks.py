@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 import pandas as pd
+import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 
 class EpisodeLogger(BaseCallback):
@@ -54,8 +55,14 @@ class EpisodeLogger(BaseCallback):
 
         if done:
             if self.outdir is not None and self._traj and not self._saved_traj:
+                df = pd.DataFrame(self._traj)
+                num_cols = ["SoC","V","I_A","T","Vmax_eff"]
+                for c in num_cols:
+                    if c in df:
+                        df[c] = pd.to_numeric(df[c], errors="coerce")
+                df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["SoC","V"])
                 self.outdir.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame(self._traj).to_csv(self.outdir / "episode_traj.csv", index=False)
+                df.to_csv(self.outdir / "episode_traj.csv", index=False)
                 self._saved_traj = True
 
             metrics = self.env_ref.compute_metrics(self._ep_infos, target_soc=self.target_soc)
