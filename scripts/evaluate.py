@@ -272,16 +272,40 @@ def main():
         write_bar(args.outdir / "bar_overT.png", rows, "overT", "count/episode")
         write_bar(args.outdir / "bar_nep0.png", rows, "nep0", "count/episode")
 
+        # Reached % (t80)
+        labels = [name for name, _ in rows]
+        perc = []
+        for _, stats in rows:
+            n_ep = int(stats.get("n_episodes", 0))
+            n_reached = int(stats.get("n_reached", 0))
+            perc.append((100.0 * n_reached / n_ep) if n_ep > 0 else np.nan)
+
+        x = np.arange(len(labels))
+        plt.figure()
+        plt.bar(x, perc)
+        plt.xticks(x, labels)
+        plt.ylabel("% reached target")
+        plt.title("Reached (t80) rate")
+        plt.ylim(0, 100)
+        plt.tight_layout()
+        plt.savefig(args.outdir / "bar_reached.png", dpi=140)
+        plt.close()
+
     # --- Console summary
     print("\n=== RQ1 Summary (mean ±95% CI) ===")
     for name, stats in rows:
+        n_ep = int(stats.get("n_episodes", 0))
+        n_reached = int(stats.get("n_reached", 0))
+        reached_pct = (100.0 * n_reached / n_ep) if n_ep > 0 else float("nan")
+
         t80 = stats.get("t80_mean", float("nan"))
         t80ci = stats.get("t80_ci", 0.0)
         t80_str = f"{t80:.1f} ± {t80ci:.1f}" if np.isfinite(t80) else "n/a"
-        print(f"{name:>10} | t80: {t80_str} | overV: {stats.get('overV_mean', np.nan):.2f}±{stats.get('overV_ci',0.0):.2f} "
+
+        print(f"{name:>10} | reached: {reached_pct:5.1f}% ({n_reached}/{n_ep}) | "
+              f"t80: {t80_str} | overV: {stats.get('overV_mean', np.nan):.2f}±{stats.get('overV_ci',0.0):.2f} "
               f"| overT: {stats.get('overT_mean', np.nan):.2f}±{stats.get('overT_ci',0.0):.2f} "
               f"| nep≈0: {stats.get('nep0_mean', np.nan):.2f}±{stats.get('nep0_ci',0.0):.2f}")
-    print(f"\nWrote {args.outdir/'summary_rq1.csv'} and {args.outdir/'summary_rq1.json'}")
 
 if __name__ == "__main__":
     main()

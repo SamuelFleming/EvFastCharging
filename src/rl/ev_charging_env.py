@@ -120,7 +120,9 @@ class EVChargingEnv(gym.Env):
                  action_bounds_C: Tuple[float,float] = (-0.05, 4.0),
                  reward_impl: Optional[BaseReward] = None,
                  backend: Optional[SimulatorBackend] = None,
-                 soh: Optional[float] = None):
+                 soh: Optional[float] = None,
+                 max_steps: int = 1800,            # NEW: episode horizon (seconds if dt_s=1)
+                 reach_bonus: float = 1000.0):     # NEW: terminal bonus
         super().__init__()
         # Load meta (V_max, T_max)
         # Load shared limits (Tbl3 and/or live_dataset.json)
@@ -129,6 +131,9 @@ class EVChargingEnv(gym.Env):
         self.T_max = float(lims["T_max"])
         self.dt_s = float(dt_s)
         self.target_soc = float(target_soc)
+        self.max_steps = int(max_steps)
+        self.reach_bonus = float(reach_bonus)
+        self._steps = 0
 
         # Keep dataset meta around for episode sampling
         self.dataset_meta = load_dataset_meta_from_processed(processed_dir)
@@ -165,37 +170,58 @@ class EVChargingEnv(gym.Env):
         if "SoH" not in self.__dict__ or self.soh is None:
             self.soh = float(ctx["soh"])
 
-        self._last_soc = obs_dict["SoC"]
+        self._last_soc = float(obs_dict["SoC"])
         obs = np.array([obs_dict["SoC"], 0.0, obs_dict["V"], obs_dict["T"]], dtype=np.float32)
+        self._steps = 0
         return obs, {}
 
     def step(self, action):
+        # 1) Action clamp
         a = float(np.clip(action[0], self.action_low, self.action_high))
+
+        # 2) Advance backend by dt
         obs_d, _, info_backend = self.backend.step(a, self.dt_s)
 
-        dSoC = float(obs_d["SoC"] - self._last_soc)
-        self._last_soc = obs_d["SoC"]
+        # 3) Compute dSoC and keep for rewards/metrics
+        dSoC = float(obs_d["SoC"] - (self._last_soc if self._last_soc is not None else obs_d["SoC"]))
+        self._last_soc = float(obs_d["SoC"])
 
-        # Compose state & limits for the reward
+        # 4) Build state for reward
         state = {
-            "SoC": obs_d["SoC"], "dSoC": dSoC, "V": obs_d["V"], "T": obs_d["T"],
-            "Nep": None,  # not modelled in surrogate yet
+            "SoC": obs_d["SoC"],
+            "dSoC": dSoC,
+            "V":   obs_d["V"],
+            "T":   obs_d["T"],
+            "Nep": None,      # surrogate doesn't model plating yet
             "SoH": self.soh,
         }
-        limits = {"V_max_nominal": self.V_max, "T_max": self.T_max}
+        limits = {
+            "V_max_nominal": self.V_max,
+            "T_max": self.T_max,
+        }
 
+        # 5) Reward
         reward, info_upd = self.reward_impl(dt_s=self.dt_s, state=state, action=a, limits=limits)
-        Vmax_eff = info_upd.get("Vmax_eff", self.V_max)
 
-        # Termination: SoH-aware violations OR reached target OR SoC ceiling
+        # 6) Effective limits/flags returned by the reward (e.g., R2 has SoH-aware Vmax)
+        Vmax_eff = float(info_upd.get("Vmax_eff", self.V_max))
+        overV_eff = int(obs_d["V"] > Vmax_eff)
+        overT_eff = int(obs_d["T"] > self.T_max)
+
+        # 7) Termination & truncation (true terminals: any over-limit or reached target)
         reached = 1 if obs_d["SoC"] >= self.target_soc else 0
-        overV_eff = int(info_upd.get("overV", 0))
-        overT_eff = int(info_upd.get("overT", 0))
-        terminated = bool(overV_eff or overT_eff or reached or obs_d["SoC"] >= 0.999)
+        self._steps += 1
+        timeout = int(self._steps >= self.max_steps)
 
-        # Gym step return
+        terminated = bool(overV_eff or overT_eff or reached or obs_d["SoC"] >= 0.999)
+        truncated  = bool(timeout and not terminated)
+
+        # 8) Terminal bonus (only when we truly reached the target)
+        if reached:
+            reward += self.reach_bonus
+
+        # 9) Observation vector and info
         obs = np.array([obs_d["SoC"], dSoC, obs_d["V"], obs_d["T"]], dtype=np.float32)
-        truncated = False
         info = {
             "t_s": info_backend["t_s"],
             "overV": overV_eff,
@@ -206,6 +232,7 @@ class EVChargingEnv(gym.Env):
             "SoC": obs_d["SoC"],
             "V":   obs_d["V"],
             "T":   obs_d["T"],
+            "dSoC": dSoC,
             "nep_zero_event": int(info_upd.get("nep_zero_event", 0)),
         }
         return obs, reward, terminated, truncated, info

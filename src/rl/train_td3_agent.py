@@ -88,7 +88,7 @@ def main():
     run_ts = time.strftime("%Y%m%d_%H%M%S")
     slug = (args.run_name.strip().replace(" ", "_") if args.run_name else None)
     run_id = f"{run_ts}_{slug}" if slug else run_ts
-    run_dir = args.out_root / run_id
+    run_dir = args.out_root / slug
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # ----- One-liner config banner -----
@@ -130,7 +130,8 @@ def main():
         target_soc=float(args.target_soc),
         action_bounds_C=(float(args.action_low), float(args.action_high)),
         reward_impl=reward_impl,
-        soh=soh_used,
+        soh=soh_used,max_steps=args.steps_per_ep,          # NEW
+        reach_bonus=1000.0 
     )
 
     # TD3 config
@@ -154,8 +155,9 @@ def main():
 
     returns, ep_metrics = [], []
     callback = EpisodeLogger(
-        env, int(args.steps_per_ep),
-        returns, ep_metrics,
+        env_ref=env,
+        out_returns=returns,
+        out_metrics=ep_metrics,
         outdir=run_dir,
         seed=int(args.seed),
         reward_variant=reward_variant_name,

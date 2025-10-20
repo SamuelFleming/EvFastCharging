@@ -7,20 +7,14 @@ from .soh_aware_vmax import SoHAwareVmax
 
 @dataclass
 class R2SoHAware(BaseReward):
-    Vmax_nominal: float
-    soh: float = 1.0
-    k_drop_perc: float = 0.10
-    lambda_V: float = 10.0
-    lambda_T: float = 10.0
-    lambda_N: float = 10.0
-
-    def __post_init__(self):
-        self._vmax_fn = SoHAwareVmax(self.Vmax_nominal, self.k_drop_perc)
+    ...
+    k_progress: float = 200.0  # NEW
 
     def __call__(self, *, dt_s: float, state: Dict, action: float, limits: Dict):
         V = float(state.get("V", 0.0))
         T = float(state.get("T", 25.0))
         Nep = state.get("Nep", None)
+        dSoC = float(state.get("dSoC", 0.0))  # NEW
         Tmax = float(limits.get("T_max", 55.0))
 
         Vmax_eff = self._vmax_fn(float(state.get("SoH", self.soh)))
@@ -29,11 +23,6 @@ class R2SoHAware(BaseReward):
         nep_zero = 1 if (Nep is not None and Nep <= 0.0) else 0
 
         penalty = self.lambda_V * overV + self.lambda_T * overT + self.lambda_N * nep_zero
-        reward = -dt_s - penalty
+        reward = self.k_progress * max(0.0, dSoC) - dt_s - penalty
 
-        return reward, {
-            "overV": overV,
-            "overT": overT,
-            "nep_zero_event": nep_zero,
-            "Vmax_eff": Vmax_eff,
-        }
+        return reward, {"overV": overV, "overT": overT, "nep_zero_event": nep_zero, "Vmax_eff": Vmax_eff}
