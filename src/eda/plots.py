@@ -1,7 +1,7 @@
 # src/eda/plots.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Sequence, Dict
+from typing import Sequence, Dict, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,7 +12,7 @@ import json
 # required base: t, V, I, T_cell, battery_id, cycle_id
 # optional derived: SoC, dSoC, C_rate, subset
 REQ_BASE = ["t", "V", "I", "T_cell", "battery_id", "cycle_id"]
-OPT = ["SoC", "dSoC", "C_rate", "subset"]
+OPT = ["SoC", "dSoC", "C_rate", "subset", "SoH", "overV", "overT", "phase"]
 
 def _has(df: pd.DataFrame, cols: Sequence[str]) -> bool:
     return all(c in df.columns for c in cols)
@@ -27,29 +27,61 @@ def _downsample(df: pd.DataFrame, target: int = 20_000) -> pd.DataFrame:
     step = max(1, len(df) // target)
     return df.iloc[::step, :]
 
+# ---------------------------------------------------------------------------
+#                            CORE STATS & EXPORTS
+# ---------------------------------------------------------------------------
+
+def _safe_minmax(a: pd.Series) -> Tuple[float | None, float | None]:
+    if a is None or a.empty:
+        return None, None
+    return float(np.nanmin(a.values)), float(np.nanmax(a.values))
+
 # ---- Stats (robust) ----
-def quick_stats(df: pd.DataFrame) -> Dict[str, float | int | None]:
-    stats = {
+def quick_stats(df: pd.DataFrame) -> Dict[str, float | int | None | dict]:
+    """Lightweight stats, now enriched with RL-relevant summaries."""
+    stats: Dict[str, float | int | None | dict] = {
         "rows": int(df.shape[0]),
         "cols": int(df.shape[1]),
         "batteries": int(df["battery_id"].nunique()) if "battery_id" in df else None,
         "cycles": int(df["cycle_id"].nunique()) if "cycle_id" in df else None,
         "subsets": int(df["subset"].nunique()) if "subset" in df else None,
     }
-    for col in ["V","I","T_cell","SoC","C_rate"]:
+    for col in ["V", "I", "T_cell", "SoC", "C_rate"]:
         if col in df.columns and len(df[col]):
-            stats[f"{col}_min"] = float(np.nanmin(df[col].values))
-            stats[f"{col}_max"] = float(np.nanmax(df[col].values))
+            mn, mx = _safe_minmax(df[col])
+            stats[f"{col}_min"] = mn
+            stats[f"{col}_max"] = mx
+            stats[f"{col}_mean"] = float(np.nanmean(df[col].values))
+            stats[f"{col}_p95"] = float(np.nanpercentile(df[col].values, 95))
+            stats[f"{col}_p99"] = float(np.nanpercentile(df[col].values, 99))
+
+    # Safety event counts if available
+    if "overV" in df.columns:
+        stats["overV_events"] = int(np.nansum(df["overV"].values))
+    if "overT" in df.columns:
+        stats["overT_events"] = int(np.nansum(df["overT"].values))
+
+    # SoH coverage
+    if "SoH" in df.columns:
+        soh_nonnull = int(df["SoH"].notna().sum())
+        stats["SoH_samples"] = soh_nonnull
+        stats["SoH_presence_ratio"] = float(soh_nonnull / max(1, len(df)))
     return stats
 
-def write_stats_json(df: pd.DataFrame, outdir: Path) -> Path:
+def write_json(obj: dict, outdir: Path, name: str) -> Path:
     outdir = _ensure_outdir(outdir)
-    p = outdir / "eda_summary.json"
+    p = outdir / name
     with open(p, "w", encoding="utf-8") as f:
-        json.dump(quick_stats(df), f, indent=2)
+        json.dump(obj, f, indent=2)
     return p
 
-# ---- Individual plots (each returns the saved file path) ----
+
+def write_stats_json(df: pd.DataFrame, outdir: Path) -> Path:
+    return write_json(quick_stats(df), outdir, "eda_summary.json")
+
+# ---------------------------------------------------------------------------
+#                                  PLOTS
+# ---------------------------------------------------------------------------
 def plot_voltage_vs_soc(df: pd.DataFrame, outdir: Path) -> Path | None:
     if not _has(df, ["V","SoC"]):
         return None
@@ -230,23 +262,175 @@ def plot_soh_vs_cv_tail(df_signals: pd.DataFrame, outdir: Path, v_thresh: float 
     fig.savefig(p, bbox_inches="tight", dpi=140); plt.close(fig)
     return p
 
+
+# ------------------------ NEW: Additional EDA plots --------------------------
+
+def plot_over_events_by_cycle(df: pd.DataFrame, outdir: Path) -> Dict[str, str] | None:
+    """Two figure files: overV_by_cycle.png and overT_by_cycle.png."""
+    need = ["battery_id", "cycle_id"]
+    if not _has(df, need):
+        return None
+    outdir = _ensure_outdir(outdir)
+
+    arts: Dict[str, str] = {}
+    for col in ["overV", "overT"]:
+        if col in df.columns:
+            agg = (
+                df.groupby(["battery_id", "cycle_id"], sort=False)[col]
+                .sum(min_count=1)
+                .reset_index(name=f"{col}_count")
+            )
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.plot(range(len(agg)), agg[f"{col}_count"], lw=1)
+            ax.set_xlabel("Cycle index")
+            ax.set_ylabel(f"{col} count")
+            ax.set_title(f"{col} events per cycle")
+            p = outdir / f"{col}_by_cycle.png"
+            fig.savefig(p, bbox_inches="tight", dpi=140)
+            plt.close(fig)
+            arts[f"{col}_by_cycle"] = str(p)
+    return arts if arts else None
+
+
+def plot_soc_hist(df: pd.DataFrame, outdir: Path) -> Path | None:
+    if "SoC" not in df.columns:
+        return None
+    outdir = _ensure_outdir(outdir)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(df["SoC"].clip(0, 1), bins=50)
+    ax.set_xlabel("SoC")
+    ax.set_ylabel("Count")
+    ax.set_title("SoC distribution")
+    p = outdir / "soc_hist.png"
+    fig.savefig(p, bbox_inches="tight", dpi=140)
+    plt.close(fig)
+    return p
+
+
+def plot_current_vs_time(df: pd.DataFrame, outdir: Path) -> Path | None:
+    if not _has(df, ["t", "I"]):
+        return None
+    outdir = _ensure_outdir(outdir)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    d = _downsample(df[["t", "I"]].sort_values("t"))
+    ax.plot(d["t"], d["I"])
+    ax.set_xlabel("t [s]")
+    ax.set_ylabel("Current [A] (sign per convention)")
+    ax.set_title("Current vs Time")
+    p = outdir / "current_vs_time.png"
+    fig.savefig(p, bbox_inches="tight", dpi=140)
+    plt.close(fig)
+    return p
+
+# ----------------------------- Diagnostics ----------------------------------
+
+def run_diagnostics(df: pd.DataFrame) -> Dict[str, object]:
+    """Return missingness, completeness, and high-level warnings."""
+    diag: Dict[str, object] = {}
+
+    # Missingness & completeness
+    miss = df.isna().sum().to_dict()
+    nonnull_ratio = {k: float(1.0 - (v / max(1, len(df)))) for k, v in miss.items()}
+    diag["missing_count"] = miss
+    diag["nonnull_ratio"] = nonnull_ratio
+
+    # Warnings
+    warnings: list[str] = []
+    if "SoH" not in df.columns or df["SoH"].notna().sum() < 5:
+        warnings.append("SoH missing or very sparse — ageing analysis may be unreliable.")
+    if "overV" not in df.columns and "overT" not in df.columns:
+        warnings.append("Safety flags (overV/overT) not present — cannot compute safety metrics.")
+    if "cycle_id" not in df.columns:
+        warnings.append("cycle_id missing — cycle-based plots/metrics disabled.")
+    if "SoC" in df.columns:
+        smin, smax = df["SoC"].min(), df["SoC"].max()
+        if smax < 0.8:
+            warnings.append("Max SoC < 0.8 — t80 comparisons may be uninformative.")
+    diag["warnings"] = warnings
+    return diag
+
+
+# --------------------------- RL Insights (read-only) -------------------------
+
+def rl_insights(df: pd.DataFrame, meta_limits: dict | None = None) -> Dict[str, object]:
+    """
+    Suggest sane ranges/targets for RL based on empirical percentiles.
+    DOES NOT write anything back to the dataset. Purely advisory.
+    """
+    ins: Dict[str, object] = {}
+
+    # Percentile-based safety ceilings from the data
+    if "V" in df.columns and len(df["V"]):
+        ins["v_limit_p99"] = float(np.nanpercentile(df["V"], 99))
+    if "T_cell" in df.columns and len(df["T_cell"]):
+        ins["t_limit_p99"] = float(np.nanpercentile(df["T_cell"], 99))
+    if "C_rate" in df.columns and len(df["C_rate"]):
+        ins["crate_limit_p99"] = float(np.nanpercentile(df["C_rate"], 99))
+
+    # Target SoC suggestion
+    if "SoC" in df.columns and len(df["SoC"]):
+        # Use 0.8 if feasible; otherwise take 90th percentile
+        max_soc = float(np.nanmax(df["SoC"]))
+        ins["target_soc_suggestion"] = float(min(0.80, max_soc)) if max_soc >= 0.8 else float(
+            np.nanpercentile(df["SoC"], 90)
+        )
+
+    # Safety flags prevalence
+    if "overV" in df.columns:
+        ins["overV_prevalence"] = float(np.nanmean(df["overV"]))
+    if "overT" in df.columns:
+        ins["overT_prevalence"] = float(np.nanmean(df["overT"]))
+
+    # SoH coverage indicator
+    if "SoH" in df.columns:
+        ins["soh_nonnull_ratio"] = float(df["SoH"].notna().mean())
+
+    # Merge known dataset limits if provided (e.g., from Tbl3 or metadata json)
+    if meta_limits:
+        ins["dataset_limits"] = {
+            k: float(v) for k, v in meta_limits.items() if k in ("V_max", "T_max", "capacity_Ah", "i_cut_c")
+        }
+
+    return ins
+
+
+def write_diagnostics_json(df: pd.DataFrame, outdir: Path) -> Path:
+    return write_json(run_diagnostics(df), outdir, "eda_diagnostics.json")
+json.dumps
+
+def write_rl_insights_json(df: pd.DataFrame, outdir: Path, meta_limits: dict | None = None) -> Path:
+    return write_json(rl_insights(df, meta_limits=meta_limits), outdir, "rl_insights.json")
+
+
+
 # ---- Convenience: run all available plots safely ----
 def run_all(df: pd.DataFrame, outdir: Path) -> dict:
     outdir = Path(outdir)
-    arts = {}
+    arts: dict = {}
+
+    # JSONs
     arts["stats_json"] = str(write_stats_json(df, outdir))
+    arts["diagnostics_json"] = str(write_diagnostics_json(df, outdir))
+
+    # Plots
     for fn, name in [
         (plot_voltage_vs_soc, "voltage_vs_soc"),
-        (plot_temp_vs_time,   "temp_vs_time"),
-        (plot_crate_vs_time,  "crate_vs_time"),
-        (plot_cv_tail_by_cycle,"cv_tail_by_cycle"),
-        (plot_correlation,    "correlation"),
-        (plot_crate_hist,     "crate_hist"),
-        # New:
-        (plot_soh_vs_cycle,   "soh_vs_cycle"),
+        (plot_temp_vs_time, "temp_vs_time"),
+        (plot_crate_vs_time, "crate_vs_time"),
+        (plot_cv_tail_by_cycle, "cv_tail_by_cycle"),
+        (plot_correlation, "correlation"),
+        (plot_crate_hist, "crate_hist"),
+        (plot_soh_vs_cycle, "soh_vs_cycle"),
         (plot_soh_vs_cv_tail, "soh_vs_cv_tail"),
+        # New:
+        (plot_over_events_by_cycle, "over_events_by_cycle"),
+        (plot_soc_hist, "soc_hist"),
+        (plot_current_vs_time, "current_vs_time"),
     ]:
         p = fn(df, outdir)
-        if p is not None:
+        if isinstance(p, dict):
+            arts.update(p)
+        elif p is not None:
             arts[name] = str(p)
+
     return arts

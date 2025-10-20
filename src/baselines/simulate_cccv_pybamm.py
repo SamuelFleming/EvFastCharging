@@ -71,6 +71,7 @@ class RunConfig:
     param_set: str
     cell_id: str
     subset: str
+    t_max: float  # <-- NEW: for overT counting
 
 
 @dataclass
@@ -80,6 +81,12 @@ class RunSummary:
     time_to_target_s: Optional[float]
     reached_target: bool
     termination: str
+    # NEW safety / provenance
+    overV_events: int
+    overT_events: int
+    nep_zero_events: int
+    solver_backend: str
+    cc_only_fallback: bool
 
 
 def _safe_get_solution_var(sol: pybamm.Solution, name_candidates: List[str]) -> Optional[np.ndarray]:
@@ -300,12 +307,24 @@ def simulate_cccv_single(cfg: RunConfig) -> Tuple[pd.DataFrame, RunSummary, str,
     except Exception:
         pass
 
+    # --- Safety counts (MVP: simple sample counts) ---
+    overV_events = int(np.count_nonzero(V > float(cfg.v_max)))
+    # T may be None in isothermal; we set it to 25°C above, so just compare to t_max
+    overT_events = int(np.count_nonzero(T > float(cfg.t_max)))
+    # No plating signal in this baseline MVP → set 0
+    nep_zero_events = 0
+
     summary = RunSummary(
         soc_init=cfg.soc_init,
         c_rate=cfg.c_rate,
         time_to_target_s=t80_s,
         reached_target=reached,
         termination=term,
+        overV_events=overV_events,
+        overT_events=overT_events,
+        nep_zero_events=nep_zero_events,
+        solver_backend=solver_backend,
+        cc_only_fallback=bool(cc_only),
     )
     return df, summary, solver_backend, cc_only
 
@@ -464,6 +483,8 @@ def main():
     target_soc = args.target_soc if args.target_soc is not None else float(extraction_cfg.get("soc_target", 0.8))
     v_max_default = float(limits.get("V_max", 4.2))
     v_max = args.v_max if args.v_max is not None else float(meta_tbl.get("V_max", v_max_default))
+    t_max_default = float(limits.get("T_max", 55.0))
+    t_max = float(meta_tbl.get("T_max", t_max_default))
 
     # Optional NASA overlay
     overlay = build_nasa_overlay(args.processed_dir, soc_min=min(args.soc_inits), soc_max=target_soc) if args.overlay_nasa else None
@@ -486,6 +507,7 @@ def main():
                 param_set=args.param_set,
                 cell_id=str(meta_tbl.get("cell_id", "unknown")),
                 subset=str(meta_tbl.get("subset", "unknown")),
+                t_max=t_max,  # <-- NEW
             )
             print(f"[CCCV] sim: SoC0={cfg.soc_init:.2f}, CC={cfg.c_rate:.2g}C, Vmax={cfg.v_max:.2f}V, Icut={cfg.i_cut_c:.3g}C, thermal={cfg.thermal}, set={cfg.param_set}")
             df, summ, backend, cc_only = simulate_cccv_single(cfg)
@@ -594,6 +616,13 @@ def main():
                 "time_to_target_s": (float(r.time_to_target_s) if r.time_to_target_s is not None else None),
                 "reached_target": bool(r.reached_target),
                 "termination": str(r.termination),
+                # NEW safety
+                "overV_events": int(r.overV_events),
+                "overT_events": int(r.overT_events),
+                "nep_zero_events": int(r.nep_zero_events),
+                # Mirror solver fields for filtering later
+                "solver_backend": str(r.solver_backend),
+                "cc_only_fallback": bool(r.cc_only_fallback),
                 "out_dir": str(Path(run_name)) if args.run_name else str(outdir),
             })
         header = not detailed_registry_csv.exists()
